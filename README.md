@@ -60,6 +60,29 @@ dsh plugin --profile web add dsh-bili-scroll
 
 ⚠️ 装完**必须重启一次 dsh**（bundle 层要重启才组装）。然后进 **设置 → 刷B站**。
 
+## 用源码 checkout 跑 dsh 的（`pnpm dsh web` / `node apps/cli/lib/bin.js`）
+
+插件要自己起一轮 headless 会话，得先知道 dsh 本体在哪。npm 全局安装和桌面版它都能自己找到；
+**从源码 checkout 直接跑**时（`~/.dsh/profiles/node_modules/@deepseek-ai/dsh` 没有链过去、
+PATH 里也没有 `dsh`），旧版会落空 → 那一轮直接 `exit 1`，日志里只有
+`'dsh' 不是内部或外部命令` 这句提示。
+
+2.0.2 起按这个顺序找，一般不用配：
+
+1. 设置里填的「dsh 路径」；
+2. `require.resolve('@deepseek-ai/dsh/lib/bin.js')`；
+3. **宿主自己的启动参数** —— `node apps/cli/lib/bin.js web` 直接命中，
+   `node --import tsx/esm apps/cli/src/bin.ts web` 会折算到同级的 `lib/bin.js`；
+4. npm 全局、桌面版应用目录、PATH。
+
+真找不到时，设置里「dsh 路径」填下面任意一种都行（插件会自动折算成 `lib/bin.js`）：
+
+- `<你的 checkout>/apps/cli`（目录）
+- `<你的 checkout>/apps/cli/src/bin.ts`
+- `<你的 checkout>/apps/cli/lib/bin.js`
+
+⚠️ 源码跑的时候 `lib/bin.js` 必须已经构建过（`pnpm run build:artifacts`），否则只能退回 PATH 里的 `dsh`。
+
 ## 装不上 / 卡住时，先看这五条（都是用户实测撞过的）
 
 1. **桌面版（DSH NEXT / 0.2.x）上"自动跑"会卡住** —— 有用户反馈：它起那一轮用的是

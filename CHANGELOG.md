@@ -1,3 +1,16 @@
+## 2.0.2 — 2026-10-22
+
+**修「源码 checkout 跑 dsh 时，插件找不到 dsh」**（用户实测：那一轮直接 `exit 1`，日志只有 `'dsh' 不是内部或外部命令`）。
+
+- 自动探测多了一条：**从宿主自己的启动参数反推** —— `node apps/cli/lib/bin.js web` 直接命中，
+  `node --import tsx/esm apps/cli/src/bin.ts web` 折算到同级的 `lib/bin.js`。
+  只依赖宿主进程自己的命令行，不要求 profile 里恰好链着 `@deepseek-ai/dsh`。
+- 设置里的「dsh 路径」不再只认 `lib/bin.js` 文件：填**包目录**（`<checkout>/apps/cli`）
+  或 **`src/bin.ts`** 都会自动折算，避免目录 EACCES / TS 语法错。
+- README 补了「源码 checkout」的排查一节。
+
+---
+
 ## 2.0.1 — 2026-10-22
 
 **修「它刷过的视频」读不到记录**（有用户面板显示 0 条，其实那轮跑得好好的，报告、评论都发了）。

@@ -24,7 +24,7 @@ const z = hostDeps.z
 const defineTool = hostDeps.defineTool
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { McpClient } from './lib/mcp.mjs'
@@ -776,10 +776,34 @@ function reportMeta() {
    *   桌面版（Electron）不是 npm -g 装的、`dsh` 也不在 PATH 上 ⇒ 老逻辑只猜三个固定位置，猜不到就让用户填 `dshBin` ✗
    *   ⇒ 现在从近到远挨个试，最后**在应用目录里做一次有界递归搜索**（只认 `dsh/lib/bin.js`，最多几千个目录就收手）。
    */
+  /**
+   * 把一个「可能是包目录 / `src/bin.ts` / `lib/bin.js`」的路径折算成能直接 spawn 的 `lib/bin.js`。
+   *
+   * 起因（2026-10-22，一位源码 checkout 的用户）：`dshBin` 填 `<repo>/apps/cli` 或
+   * `apps/cli/src/bin.ts` 时，旧逻辑把它原样交给 `process.execPath` 去跑 —— 目录会 EACCES、
+   * `.ts` 会语法报错，然后整轮以 `exit 1` 结束。这里统一折算到构建产物 `lib/bin.js`。
+   * @param p - 用户填的绝对路径（目录、`src/bin.ts` 或 `lib/bin.js`）。
+   * @returns 可执行的 `lib/bin.js` 绝对路径；折算不出来返回空串。
+   */
+  const dshEntryOf = (p) => {
+    try {
+      if (!existsSync(p)) return ''
+      if (!statSync(p).isDirectory()) {
+        if (/[\\/]lib[\\/]bin\.js$/i.test(p)) return p
+        const built = p.replace(/[\\/]src[\\/]bin\.ts$/i, '/lib/bin.js')
+        return existsSync(built) ? built : ''
+      }
+      const fromDir = join(p, 'lib', 'bin.js')
+      return existsSync(fromDir) ? fromDir : ''
+    } catch { return '' }
+  }
   const findDshCli = () => {
-    // ① 用户显式填的
+    // ① 用户显式填的（包目录 / src/bin.ts / lib/bin.js 都认）
     const explicit = String(cfg.dshBin || '').trim()
-    if (explicit && existsSync(explicit)) return explicit
+    if (explicit) {
+      const hit = dshEntryOf(resolve(explicit))
+      if (hit) return hit
+    }
     // ② 让 Node 的解析器替我们找（web profile / 桌面版 app 目录，两条路都可能命中）
     try {
       const req = createRequire(import.meta.url)
@@ -787,6 +811,18 @@ function reportMeta() {
         try { const p = req.resolve(spec); if (p && existsSync(p)) return p } catch { /* 换下一个 */ }
       }
     } catch { /* 解析器不可用就跳过 */ }
+    // ②.5 从**宿主自己的启动参数**反推（源码 checkout / 直接跑构建产物两种都覆盖）：
+    //      `node apps/cli/lib/bin.js web`                  → argv[1] = …/apps/cli/lib/bin.js
+    //      `node --import tsx/esm apps/cli/src/bin.ts web` → argv[1] = …/apps/cli/src/bin.ts ⇒ 同级 lib/bin.js
+    //      ⚠️ 只要 `~/.dsh/profiles/node_modules/@deepseek-ai/dsh` 不在（换机、profile 重装、pnpm 未 hoist），
+    //         ② 就落空；这一条只依赖宿主进程自己的命令行，最贴近"正在跑的这个 dsh 是谁"。
+    try {
+      const entry = process.argv[1] ? resolve(process.argv[1]) : ''
+      if (entry) {
+        const hit = dshEntryOf(entry)
+        if (hit) return hit
+      }
+    } catch { /* 推导失败就继续后面的候选 */ }
     // ③ npm 全局 / POSIX 常见位置
     for (const g of [
       join(process.env.APPDATA || '', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
